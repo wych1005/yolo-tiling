@@ -9,7 +9,7 @@ import random
 from shutil import copyfile
  
 
-def tiler(imnames, newpath, falsepath, slice_size, ext):
+def tiler(imnames, newpath, falsepath, slice_size, ext, bb):
     for imname in imnames:
         im = Image.open(imname)
         imr = np.array(im, dtype=np.uint8)
@@ -42,7 +42,7 @@ def tiler(imnames, newpath, falsepath, slice_size, ext):
                 y1 = height - (i*slice_size)
                 x2 = ((j+1)*slice_size) - 1
                 y2 = (height - (i+1)*slice_size) + 1
-
+                # area = abs(((x2 - x1)*(y2 - y1))/(32*32))
                 pol = Polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)])
                 imsaved = False
                 slice_labels = []
@@ -50,17 +50,7 @@ def tiler(imnames, newpath, falsepath, slice_size, ext):
                 for box in boxes:
                     if pol.intersects(box[1]):
                         inter = pol.intersection(box[1])        
-                        
-                        if not imsaved:
-                            sliced = imr[i*slice_size:(i+1)*slice_size, j*slice_size:(j+1)*slice_size]
-                            sliced_im = Image.fromarray(sliced)
-                            filename = imname.split('/')[-1]
-                            slice_path = newpath + "/" + filename.replace(ext, f'_{i}_{j}{ext}')                            
-                            slice_labels_path = newpath + "/" + filename.replace(ext, f'_{i}_{j}.txt')                            
-                            print(slice_path)
-                            sliced_im.save(slice_path)
-                            imsaved = True                    
-                        
+
                         # get smallest rectangular polygon (with sides parallel to the coordinate axes) that contains the intersection
                         new_box = inter.envelope 
                         
@@ -77,12 +67,25 @@ def tiler(imnames, newpath, falsepath, slice_size, ext):
                         # we have to normalize central x and invert y for yolo format
                         new_x = (centre.coords.xy[0][0] - x1) / slice_size
                         new_y = (y1 - centre.coords.xy[1][0]) / slice_size
+                        area = float(new_width) * float(new_height)
+                        print("area: ", area)
+
+
+                        if not imsaved and area > bb:
+                            sliced = imr[i*slice_size:(i+1)*slice_size, j*slice_size:(j+1)*slice_size]
+                            sliced_im = Image.fromarray(sliced)
+                            filename = imname.split('/')[-1]
+                            slice_path = newpath + "/" + filename.replace(ext, f'_{i}_{j}{ext}')                      
+                            slice_labels_path = newpath + "/" + filename.replace(ext, f'_{i}_{j}.txt')                            
+                            print(slice_path)
+                            sliced_im.save(slice_path)
+                            imsaved = True                                            
                         
                         counter += 1
 
                         slice_labels.append([box[0], new_x, new_y, new_width, new_height])
                 
-                if len(slice_labels) > 0:
+                if len(slice_labels) > 0 and area > bb:
                     slice_df = pd.DataFrame(slice_labels, columns=['class', 'x1', 'y1', 'w', 'h'])
                     print(slice_df)
                     slice_df.to_csv(slice_labels_path, sep=' ', index=False, header=False, float_format='%.6f')
@@ -135,6 +138,7 @@ if __name__ == "__main__":
     parser.add_argument("-falsefolder", default=None, help = "Folder for tiles without bounding boxes")
     parser.add_argument("-size", type=int, default=416, help = "Size of a tile. Dafault: 416")
     parser.add_argument("-ratio", type=float, default=0.8, help = "Train/test split ratio. Dafault: 0.8")
+    parser.add_argument("-bb", type=float, default=0.1999, help = "Area of bounding box threshold")
 
     args = parser.parse_args()
 
@@ -166,5 +170,5 @@ if __name__ == "__main__":
         elif len(os.listdir(args.falsefolder)) > 0:
             raise Exception("Folder for tiles without boxes should be empty")
 
-    tiler(imnames, args.target, args.falsefolder, args.size, args.ext)
+    tiler(imnames, args.target, args.falsefolder, args.size, args.ext, args.bb)
     splitter(args.target, target_upfolder, args.ext, args.ratio)
